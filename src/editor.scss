@@ -1,0 +1,299 @@
+/* geoedit 編集UI — 地図側UIの意匠は quiet-mono（#map スコープ）＝ここでは触らない。
+   z-index 不使用＝重なりは DOM 順（japan の掟）。ガジェット搭載時に controller が <style> として注入（CSS自給）。 */
+@use "quiet-mono/tokens.scss" as *;
+
+/* ── 編集オーバレイ（ハンドル・ラバーバンド）：GLキャンバスの後段＝上に重なる。
+      平時は pointer-events:none＝パン/クリックは素通し。頂点ドラッグは controller が
+      mapEl の capture-phase pointerdown で奪う（canvas側は常に none のまま）。 ── */
+#map canvas.ge-overlay {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+/* ── ツールバー（#map 直下・エンジン家具の後に append＝上に重なる）── */
+#ge-toolbar {
+	position: absolute;
+	top: 10px;
+	/* 中央寄せは left/right:0 + margin:auto + fit-content＝絶対配置の shrink-to-fit を親の全幅で計算させる。
+	   left:50%+translateX(-50%) だと利用可能幅が「50%から右端まで」＝画面の半分で折り返してしまう（flex-wrap 併用の罠・9/4実測） */
+	left: 0; right: 0; margin: 0 auto;
+	width: fit-content;
+	display: flex;
+	flex-wrap: wrap;               /* 狭画面＝16個のボタンを折り返す（はみ出して押せない列を作らない） */
+	justify-content: center;
+	max-width: calc(100vw - 20px);
+	align-items: center;
+	gap: 4px;
+	padding: 4px 6px;
+	border-radius: 10px;
+	background: rgba(16, 24, 44, .42);
+	border: 1px solid rgba(255, 255, 255, .14);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	font: 12px/1.4 "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", sans-serif;
+	color: #cdd6e6;
+	user-select: none;
+}
+/* 部品の「×」＝ツールバーの右端（区切りで間を空けて最後に置く＝ツールと見間違えない） */
+#ge-toolbar .ge-close { margin-inline-start: 10px; }
+#ge-toolbar[hidden] { display: none; }
+#ge-toolbar button {
+	all: unset;
+	cursor: pointer;
+	padding: 5px 9px;
+	border-radius: 7px;
+	line-height: 1;
+	font-size: 14px;
+	color: #cdd6e6;
+}
+#ge-toolbar button:hover { background: rgba(255, 255, 255, .10); }
+#ge-toolbar button.on { background: rgba(120, 170, 255, .28); color: #fff; }
+#ge-toolbar button:disabled { opacity: .35; cursor: default; }
+#ge-toolbar .ge-sep { width: 1px; align-self: stretch; margin: 2px 3px; background: rgba(255, 255, 255, .14); }
+
+/* ボタンの吹き出し説明（data-tip）：見た目（黒地・白字・フェード・タッチ非表示）は quiet-mono の #map [data-tip] 一本＝ここは置き場所だけ。
+   ツールバーは上辺中央＝ボタンの下へ／パネルの頭のアイコンは右上＝左下へ出す */
+#ge-toolbar [data-tip], .ge-panel [data-tip] { position: relative; }
+#ge-toolbar [data-tip]::after, .ge-panel [data-tip]::after { top: calc(100% + 8px); }
+#ge-toolbar [data-tip]::after { left: 50%; transform: translateX(-50%); }
+.ge-panel [data-tip]::after { right: 0; }
+
+/* スナップ格子の段選択（1e-3〜1e-7） */
+#ge-toolbar .ge-snapwrap { display: inline-flex; }   /* select の包み＝data-tip の錨（::after はここに付く） */
+#ge-toolbar select.ge-snap {
+	all: unset;
+	cursor: pointer;
+	padding: 5px 6px;
+	border-radius: 7px;
+	font-size: 12px;
+	color: #cdd6e6;
+	background: rgba(255, 255, 255, .06);
+}
+
+/* ── プロパティ／エクスポートなどの浮きパネル（ツールバーの下に出す）── */
+.ge-panel {
+	position: absolute;
+	top: 54px;
+	right: 10px;
+	width: 280px;
+	max-width: calc(100vw - 20px);
+	max-height: calc(100% - 70px);
+	overflow: auto;
+	padding: 8px 12px 12px;
+	border-radius: 10px;
+	background: rgba(16, 24, 44, .55);
+	border: 1px solid rgba(255, 255, 255, .14);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	font: 12px/1.6 "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", sans-serif;
+	color: #cdd6e6;
+}
+/* 書き出し／クラウド＝一時のダイアログ：右のスタイル/選択パネルと同じ座標に積まない＝ツールバー直下の中央へ。
+   同時に開くのは1枚（.ge-dialog を開く側が前の1枚を外す） */
+.ge-panel.ge-dialog { right: auto; left: 50%; transform: translateX(-50%); }
+/* タイトル行＝見出し＋削除＋×（左端は本体ラベルと揃え、×は右上の角へ） */
+.ge-panel .ge-head {
+	display: flex; align-items: center; gap: 2px;
+	margin: 0 0 8px; padding-bottom: 6px;
+	border-bottom: 1px solid rgba(255, 255, 255, .12);
+	position: sticky; top: -8px; z-index: 1;
+	background: rgba(16, 24, 44, .85);
+}
+.ge-panel .ge-head h3 { margin: 0; flex: 1; font-size: 12px; font-weight: 600; opacity: .85; }
+.ge-panel .ge-icon-btn {
+	all: unset; cursor: pointer; width: 24px; height: 24px; border-radius: 6px;
+	display: flex; align-items: center; justify-content: center; opacity: .65;
+}
+.ge-panel .ge-icon-btn:last-child { margin-right: -5px; }   /* × を右上の角（本体の右端）へ寄せる */
+.ge-panel .ge-icon-btn:hover { background: rgba(255, 255, 255, .16); opacity: 1; }
+/* 区切り線（見出しの言葉は置かない＝「見た目」削除・本人裁定） */
+.ge-panel .ge-hr { margin: 10px 0 6px; border-top: 1px solid rgba(255, 255, 255, .12); }
+/* 従属行の箱（ポリゴン化ONの塗り色/始点/終点＝左の薄い罫でぶら下がりを見せる） */
+.ge-panel .ge-sub { margin-left: 4px; padding-left: 8px; border-left: 2px solid rgba(255, 255, 255, .1); }
+/* 現在スタイルの見本 */
+.ge-panel .ge-preview {
+	display: flex; align-items: center; justify-content: center;
+	height: 44px; margin: 2px 0 8px; border-radius: 7px;   /* 「見た目」見出し撤去の分＝下に一呼吸 */
+	background:
+		linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.06) 75%) 0 0/12px 12px,
+		linear-gradient(45deg, rgba(255,255,255,.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.06) 75%) 6px 6px/12px 12px,
+		rgba(0, 0, 0, .18);
+	border: 1px solid rgba(255, 255, 255, .1);
+}
+.ge-panel .ge-preview canvas { display: block; }
+/* 属性バー（＝属性を表示トグル） */
+.ge-panel .ge-attrbar { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.ge-panel table { width: 100%; border-collapse: collapse; }
+.ge-panel td { padding: 2px 0; vertical-align: top; }
+.ge-panel td:first-child { opacity: .7; padding-right: 8px; white-space: nowrap; }
+.ge-panel input, .ge-panel textarea {
+	all: unset;
+	box-sizing: border-box;
+	width: 100%;
+	padding: 2px 5px;
+	border-radius: 5px;
+	background: rgba(255, 255, 255, .08);
+	color: #e8eef8;
+}
+.ge-panel button {
+	all: unset;
+	cursor: pointer;
+	padding: 4px 9px;
+	margin: 2px 4px 2px 0;
+	border-radius: 7px;
+	background: rgba(255, 255, 255, .08);
+	color: #cdd6e6;
+}
+.ge-panel button:hover { background: rgba(255, 255, 255, .16); }
+.ge-panel button.on { background: rgba(120, 170, 255, .28); color: #fff; }
+
+/* styleform の行（ラベル＋コントロール） */
+.ge-panel .ge-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 4px 0;
+}
+.ge-panel .ge-row > label { flex: none; width: 6.2em; white-space: nowrap; opacity: .75; }   /* 「ツールチップ」等が2行に折り返さない幅 */
+/* 色スウォッチ（定番色の小さなチップ＋末尾に「その他」のネイティブ入力） */
+.ge-panel .ge-swatches { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.ge-panel .ge-swatch {
+	all: unset;
+	box-sizing: border-box;
+	width: 18px;
+	height: 18px;
+	border-radius: 5px;
+	cursor: pointer;
+	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
+}
+.ge-panel .ge-swatch:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .6); }
+.ge-panel .ge-swatch.on { box-shadow: 0 0 0 2px #fff, inset 0 0 0 1px rgba(0, 0, 0, .35); }
+.ge-panel .ge-swatch-custom { padding: 0; border: 1px dashed rgba(255, 255, 255, .5); }   /* 「その他の色」＝破線で区別（値の色を表示） */
+.ge-panel .ge-swatch-custom::-webkit-color-swatch-wrapper { padding: 0; }
+.ge-panel .ge-swatch-custom::-webkit-color-swatch { border: none; border-radius: 4px; }
+/* 色トリガー＝横長の現色バー＋▾（押すと下のパレットが開く。パレットはそのまま） */
+.ge-panel .ge-color-trigger {
+	all: unset; cursor: pointer; flex: 1; box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+	padding: 3px 8px; border-radius: 6px; background: rgba(255, 255, 255, .08);
+}
+.ge-panel .ge-color-trigger:hover, .ge-panel .ge-color-trigger.open { background: rgba(255, 255, 255, .18); }
+.ge-panel .ge-color-chip { flex: 1; height: 15px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); }
+.ge-panel .ge-color-caret { flex: none; font-size: 9px; opacity: .7; transition: transform .12s; }
+.ge-panel .ge-color-trigger.open .ge-color-caret { transform: rotate(180deg); }
+/* 基本図形パレット（canvas 単色・面積そろえ）のボタン */
+.ge-panel .ge-shape-btn {
+	all: unset; cursor: pointer; position: relative; padding: 3px; margin: 2px 3px 2px 0; border-radius: 6px;
+	background: rgba(255, 255, 255, .08); display: inline-flex; vertical-align: middle;
+}
+.ge-panel .ge-shape-btn:hover { background: rgba(255, 255, 255, .16); }
+.ge-panel .ge-shape-btn.on { background: rgba(120, 170, 255, .28); }
+.ge-panel .ge-shape-btn canvas { display: block; }
+/* pin（3D）を circle と区別する小バッジ */
+.ge-panel .ge-3d-badge {
+	position: absolute; right: -1px; bottom: -1px; padding: 0 2px; border-radius: 4px;
+	font-size: 7px; line-height: 1.3; font-weight: 700; letter-spacing: .02em;
+	background: #4263eb; color: #fff; pointer-events: none;
+}
+/* パレット（行の下にインライン展開）＝12列の整列グリッドで2行を埋める */
+.ge-panel .ge-color-pop {
+	margin: 4px 0 6px; padding: 8px; border-radius: 8px;
+	background: rgba(0, 0, 0, .28); border: 1px solid rgba(255, 255, 255, .12);
+}
+.ge-panel .ge-color-pop .ge-swatches { display: grid; grid-template-columns: repeat(12, 1fr); gap: 5px; }
+.ge-panel .ge-color-pop .ge-swatch { width: 100%; height: auto; aspect-ratio: 1; border-radius: 4px; }
+/* 吹き出しに「↓コピー（上のツールチップをコピー）」小ボタン */
+.ge-panel .ge-copytip {
+	all: unset; cursor: pointer; padding: 1px 8px; border-radius: 5px;
+	font-size: 11px; line-height: 1.5; background: rgba(255, 255, 255, .1); opacity: .85;
+}
+.ge-panel .ge-copytip:hover { background: rgba(255, 255, 255, .2); opacity: 1; }
+.ge-panel .ge-row input[type="range"] { flex: 1; min-width: 70px; accent-color: #78aadd; }
+.ge-panel .ge-row .ge-val { min-width: 3.2em; text-align: right; opacity: .8; }
+.ge-panel .ge-drop {
+	flex: 1;
+	border: 1px dashed rgba(255, 255, 255, .3);
+	border-radius: 8px;
+	padding: 8px;
+	text-align: center;
+	opacity: .8;
+}
+
+/* @tip ホバーツールチップ（一言＝データのプロパティがそのまま出る）。
+   クリックで同内容が pop になる運用が多い＝pop（.pop）と箱の形・位置を揃える（黒0.75・白文字・角丸5px・
+   左右上下パディングは pop と同じ。ただし pop の右端はアイコン分だけ広い＝ここは合わせない）。 */
+.ge-tip {
+	position: absolute;
+	max-width: 280px;
+	padding: 8px 12px;
+	border-radius: 5px;
+	background: rgba(0, 0, 0, .75);
+	border: 1px solid rgba(255, 255, 255, .2);
+	color: #fff;
+	font: 12px/1.5 "Noto Sans JP", "Hiragino Sans", sans-serif;
+	pointer-events: none;
+	white-space: pre-line;   /* @tip の改行を活かす */
+}
+.ge-tip img { max-width: 200px; max-height: 150px; display: block; border-radius: 3px; }   /* @tip は HTML/画像可 */
+
+/* 左下バナー（ドックの中＝#log/#pos と同じ積み方・薄硝子）：復元通知など。行動ボタン＋× */
+#map .ge-banner {
+	display: flex; align-items: center; gap: 8px;
+	padding: 5px 6px 5px 10px; border-radius: 8px;
+	background: rgba(16, 24, 44, .55);
+	border: 1px solid rgba(255, 255, 255, .14);
+	backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+	font: 12px/1.4 "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", sans-serif;
+	color: #e8eef8;
+	max-width: min(360px, calc(100vw - 20px));
+}
+#map .ge-banner button { all: unset; cursor: pointer; padding: 3px 9px; border-radius: 6px; background: rgba(120, 170, 255, .28); color: #fff; white-space: nowrap; }
+#map .ge-banner button:hover { background: rgba(120, 170, 255, .42); }
+#map .ge-banner button.ge-x { background: none; opacity: .65; padding: 2px 4px; font-size: 14px; }
+#map .ge-banner button.ge-x:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+
+/* 画面上の「確定／取消」バー（作図中・束ね中だけ。タッチ端末＝Enter/Esc の代役）＝トーストの上 */
+.ge-confirm {
+	position: absolute;
+	bottom: 88px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	gap: 6px;
+	padding: 4px 6px;
+	border-radius: 10px;
+	background: rgba(16, 24, 44, .55);
+	border: 1px solid rgba(255, 255, 255, .14);
+	backdrop-filter: blur(6px);
+	-webkit-backdrop-filter: blur(6px);
+	font: 13px/1.4 "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", sans-serif;
+	user-select: none;
+}
+.ge-confirm[hidden] { display: none; }
+.ge-confirm button { all: unset; cursor: pointer; padding: 7px 14px; border-radius: 7px; color: #cdd6e6; background: rgba(255, 255, 255, .08); }
+.ge-confirm button:hover { background: rgba(255, 255, 255, .16); }
+.ge-confirm button.ge-ok { background: rgba(120, 170, 255, .28); color: #fff; }
+.ge-confirm button[hidden] { display: none; }
+
+/* トースト（「編集はz≥7で」等の一言） */
+.ge-toast {
+	position: absolute;
+	bottom: 46px;
+	left: 50%;
+	transform: translateX(-50%);
+	padding: 6px 12px;
+	border-radius: 8px;
+	background: rgba(16, 24, 44, .7);
+	border: 1px solid rgba(255, 255, 255, .14);
+	color: #e8eef8;
+	font: 12px/1.4 "Noto Sans JP", sans-serif;
+	pointer-events: none;
+	transition: opacity .25s ease;
+}
+.ge-toast.gone { opacity: 0; }
+
+// 編集中（#map.ge-on）＝星空劇場の日時計（右上 #sky-clock）は出さない（本人裁定 9/15「geoedit では右上の日付を表示しない」）
+#map.ge-on #sky-clock { display: none; }
